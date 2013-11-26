@@ -1,10 +1,17 @@
+#include <fcntl.h>
 #include <stdio.h>
-#include <unistd.h>
-#include <time.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 
 #define SAMPLES 16
+
+// states
+#define INITIAL 0
+#define SAW_NOTE_ON 1
 
 double current_minute() {
   struct timeval te;
@@ -150,8 +157,8 @@ char* nine[] = {
 char** digits[] = {zero, one, two, three, four, five, six, seven, eight, nine};
 
 void display_tempo(int n) {
-  if (n > 999 || n < 0) {
-    printf("%d\n", n);
+  if (1 || n > 999 || n < 0) {
+    printf("%d\n\n", n);
     return;
   }
 
@@ -173,22 +180,55 @@ void display_tempo(int n) {
   }
 }
 
-   
 int main(int argc, char** argv) {
+  if (argc != 3) {
+    printf("usage: %s device key\n", argv[0]);
+    printf("  device: /dev/midi\n");
+    printf("  key: 36\n");
+    printf("       -1 for key means display mode\n");
+    exit(1);
+  }
+
+  int key = atoi(argv[2]);
+  int display_mode = key == -1;
+  if (!display_mode && (key < 0 || key > 127)) {
+    printf("key must be between 0 and 127.  The dtx500 kick drum is 36\n");
+    exit(1);
+  } 
+
+  int fd = open(argv[1], O_RDONLY);
+  if (fd == -1) {
+    perror("tempo: open");
+    exit(1);
+  }
+
+  int state = INITIAL;
+
   double ts[SAMPLES];
   int pos = 0;
 
-  char c;
-  while(1) {
-    read(1, &c, 1);
-    ts[pos % SAMPLES] = current_minute();
-    if (pos > SAMPLES) {
-       int tempo = (SAMPLES-1)/(
-          ts[pos % SAMPLES] -
-          ts[(pos+1) % SAMPLES]) + 0.5;
-       display_tempo(tempo);
+  unsigned char c;
+  while (1) {
+    read(fd, &c, 1);
+
+    if (state == INITIAL) {
+      if (c >= 0x90 && c < 0xA0) {
+        state = SAW_NOTE_ON;
+      }
+    } else if (state == SAW_NOTE_ON) {
+      if (display_mode) {
+	printf("  %d\n", c);
+      } else if (c == key) {
+        ts[pos % SAMPLES] = current_minute();
+        if (pos > SAMPLES) {
+          int tempo = (SAMPLES-1)/(
+            ts[pos % SAMPLES] -
+            ts[(pos+1) % SAMPLES]) + 0.5;
+          display_tempo(tempo);
+        }
+        pos++;
+      }
+      state = INITIAL;
     }
-    
-    pos++;
   }
 }
